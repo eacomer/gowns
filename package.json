@@ -1,0 +1,8 @@
+{
+  "name": "gowns-proxy",
+  "version": "1.0.0",
+  "main": "api/recommend.js",
+  "dependencies": {
+    "openai": "^4.8.0"
+  }
+}
