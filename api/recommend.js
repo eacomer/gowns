@@ -1,6 +1,5 @@
 // api/recommend.js
 
-import { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
@@ -28,12 +27,12 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ─── 4) MEASUREMENTS ───────────────────────────────────────────────────
+    // ─── 4) EXTRACT MEASUREMENTS ─────────────────────────────────────────────
     const { bust, waist, hips, heightFeet, heightInches } = req.body;
     const measurementText = 
       `Bust: ${bust}"  Waist: ${waist}"  Hips: ${hips}"  Height: ${heightFeet}'${heightInches}"`;
 
-    // ─── 5) STYLE RECOMMENDATION ───────────────────────────────────────────
+    // ─── 5) ASK CHATGPT FOR STYLE RECOMMENDATION ─────────────────────────────
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -46,7 +45,7 @@ export default async function handler(req, res) {
     });
     const recommendation = chat.choices[0].message.content.trim();
 
-    // ─── 6) IMAGE GENERATION ───────────────────────────────────────────────
+    // ─── 6) GENERATE THREE IMAGES VIA DALL·E ────────────────────────────────
     const imgPromises = Array(3).fill().map(() =>
       openai.images.generate({
         model: 'dall-e-3',
@@ -58,7 +57,7 @@ export default async function handler(req, res) {
     const imgs = await Promise.all(imgPromises);
     const imageUrls = imgs.map(r => r.data[0].url);
 
-    // ─── 7) RESPONSE ───────────────────────────────────────────────────────
+    // ─── 7) RETURN JSON ─────────────────────────────────────────────────────
     return res.status(200).json({ recommendation, images: imageUrls });
 
   } catch (err) {
