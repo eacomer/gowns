@@ -1,6 +1,5 @@
 // api/recommend.js
 
-import 'dotenv/config';
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
 
@@ -10,7 +9,6 @@ const openai = new OpenAI({
 
 export default async function handler(req, res) {
   // ─── 1) CORS HEADERS ─────────────────────────────────────────────────────
-  // Allow only your WP site origin (or '*' for testing)
   res.setHeader('Access-Control-Allow-Origin', 'https://enchantedgowns.com');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
@@ -19,24 +17,23 @@ export default async function handler(req, res) {
     'Content-Type, Authorization'
   );
 
-  // ─── 2) HANDLE PRE-FLIGHT ────────────────────────────────────────────────
+  // ─── 2) PRE-FLIGHT ───────────────────────────────────────────────────────
   if (req.method === 'OPTIONS') {
-    // Send back just the CORS headers and no body
     return res.status(204).end();
   }
 
-  // ─── 3) ONLY ALLOW POST ─────────────────────────────────────────────────
+  // ─── 3) METHOD CHECK ────────────────────────────────────────────────────
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // ─── 4) EXTRACT MEASUREMENTS ─────────────────────────────────────────────
+    // ─── 4) MEASUREMENTS ───────────────────────────────────────────────────
     const { bust, waist, hips, heightFeet, heightInches } = req.body;
     const measurementText = 
       `Bust: ${bust}"  Waist: ${waist}"  Hips: ${hips}"  Height: ${heightFeet}'${heightInches}"`;
 
-    // ─── 5) ASK CHATGPT FOR STYLE RECOMMENDATION ─────────────────────────────
+    // ─── 5) STYLE RECOMMENDATION ───────────────────────────────────────────
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -49,7 +46,7 @@ export default async function handler(req, res) {
     });
     const recommendation = chat.choices[0].message.content.trim();
 
-    // ─── 6) GENERATE THREE IMAGES VIA DALL·E ────────────────────────────────
+    // ─── 6) IMAGE GENERATION ───────────────────────────────────────────────
     const imgPromises = Array(3).fill().map(() =>
       openai.images.generate({
         model: 'dall-e-3',
@@ -61,11 +58,8 @@ export default async function handler(req, res) {
     const imgs = await Promise.all(imgPromises);
     const imageUrls = imgs.map(r => r.data[0].url);
 
-    // ─── 7) RETURN JSON ─────────────────────────────────────────────────────
-    return res.status(200).json({
-      recommendation,
-      images: imageUrls
-    });
+    // ─── 7) RESPONSE ───────────────────────────────────────────────────────
+    return res.status(200).json({ recommendation, images: imageUrls });
 
   } catch (err) {
     console.error('recommend.js error:', err);
