@@ -1,3 +1,6 @@
+// api/recommend.js
+
+import 'dotenv/config';
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
 
@@ -6,9 +9,9 @@ const openai = new OpenAI({
 });
 
 export default async function handler(req, res) {
-  // 1) CORS headers
-  res.setHeader('Access-Control-Allow-Origin', 'https://enchantedgowns.com'); 
-  // (or use '*' during testing, but lock down to your domain in prod)
+  // ─── 1) CORS HEADERS ─────────────────────────────────────────────────────
+  // Allow only your WP site origin (or '*' for testing)
+  res.setHeader('Access-Control-Allow-Origin', 'https://enchantedgowns.com');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'OPTIONS, POST');
   res.setHeader(
@@ -16,33 +19,37 @@ export default async function handler(req, res) {
     'Content-Type, Authorization'
   );
 
-  // 2) Handle preflight
+  // ─── 2) HANDLE PRE-FLIGHT ────────────────────────────────────────────────
   if (req.method === 'OPTIONS') {
-    return res.status(204).end(); // No content, but CORS headers sent
+    // Send back just the CORS headers and no body
+    return res.status(204).end();
   }
 
+  // ─── 3) ONLY ALLOW POST ─────────────────────────────────────────────────
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Only POST allowed' });
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
+    // ─── 4) EXTRACT MEASUREMENTS ─────────────────────────────────────────────
     const { bust, waist, hips, heightFeet, heightInches } = req.body;
     const measurementText = 
       `Bust: ${bust}"  Waist: ${waist}"  Hips: ${hips}"  Height: ${heightFeet}'${heightInches}"`;
 
-    // === your existing OpenAI calls ===
+    // ─── 5) ASK CHATGPT FOR STYLE RECOMMENDATION ─────────────────────────────
     const chat = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'You are a high-end fashion stylist.' },
         { role: 'user', content:
             `Based on these measurements—${measurementText}—what dress style ` +
-            `would best flatter this figure? Please name a single style (e.g. “A-line maxi”).`
+            `would best flatter this figure? Please name a single style, e.g. “A-line maxi.”`
         }
       ]
     });
     const recommendation = chat.choices[0].message.content.trim();
 
+    // ─── 6) GENERATE THREE IMAGES VIA DALL·E ────────────────────────────────
     const imgPromises = Array(3).fill().map(() =>
       openai.images.generate({
         model: 'dall-e-3',
@@ -54,11 +61,14 @@ export default async function handler(req, res) {
     const imgs = await Promise.all(imgPromises);
     const imageUrls = imgs.map(r => r.data[0].url);
 
-    // 3) Return JSON with CORS headers in place
-    res.status(200).json({ recommendation, images: imageUrls });
+    // ─── 7) RETURN JSON ─────────────────────────────────────────────────────
+    return res.status(200).json({
+      recommendation,
+      images: imageUrls
+    });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('recommend.js error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 }
