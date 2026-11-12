@@ -1,49 +1,203 @@
 
 /**
- * Enchanted Gowns - Wedding Dress Recommendation API
+ * Enchanted Gowns - AI Wedding Dress Style Picker
  *
- * Hosting: Vercel
+ * Version: 2.0 - Permanent Image Library
+ *
+ * Hosted on Vercel
  * Endpoint: /api/recommend
  *
- * Text model: gpt-4o-mini
- * Image model: gpt-image-2.5-flare
+ * Uses OpenAI for personalized recommendations.
+ * Uses existing WordPress images instead of generating
+ * new images for each visitor.
  *
- * Optimized for:
- * - Lower image generation cost
- * - Faster response times
- * - WordPress plugin compatibility
- * - Graceful image failures
+ * Compatible with WordPress plugin v1.9.
  */
-
-// Allow more time for image generation.
-// Actual limit depends on Vercel plan/configuration.
-export const config = {
-  maxDuration: 60
-};
 
 import OpenAI from 'openai';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 55000,
-  maxRetries: 0
+  timeout: 20000,
+  maxRetries: 1
 });
 
-// Configuration
+// ----------------------------------------------------
+// CONFIGURATION
+// ----------------------------------------------------
+
 const TEXT_MODEL = 'gpt-4o-mini';
-const IMAGE_MODEL = 'gpt-image-2.5-flare';
-
-// Change low to medium for improved image quality.
-const IMAGE_QUALITY = 'low';
-
-const IMAGE_SIZE = '1024x1024';
 const MAX_RECOMMENDATIONS = 3;
+
+const IMAGE_BASE =
+  'https://enchantedgowns.com/egwp/wp-content/uploads/2026/11/';
+
+// ----------------------------------------------------
+// PERMANENT WEDDING GOWN IMAGE LIBRARY
+// ----------------------------------------------------
+
+const STYLE_IMAGES = {
+  'A-Line': IMAGE_BASE + 'a-line.jpg',
+
+  'Modified A-Line':
+    IMAGE_BASE + 'modified-a-line.jpg',
+
+  'Ball Gown':
+    IMAGE_BASE + 'ball-gown.jpg',
+
+  'Mermaid':
+    IMAGE_BASE + 'mermaid.jpg',
+
+  'Fit and Flare':
+    IMAGE_BASE + 'fit-and-flare.jpg',
+
+  'Trumpet':
+    IMAGE_BASE + 'trumpet.jpg',
+
+  'Sheath':
+    IMAGE_BASE + 'sheath.jpg',
+
+  'Empire':
+    IMAGE_BASE + 'empire.jpg',
+
+  'Tea Length':
+    IMAGE_BASE + 'tea-length.jpg',
+
+  'Mini':
+    IMAGE_BASE + 'mini.jpg'
+};
+
+// ----------------------------------------------------
+// STYLE NORMALIZATION
+// Ensures AI output matches our image filenames.
+// ----------------------------------------------------
+
+function normalizeStyle(value) {
+  const cleaned = String(value || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+
+  const aliases = {
+    'a line': 'A-Line',
+    'aline': 'A-Line',
+
+    'modified a line': 'Modified A-Line',
+
+    'ball gown': 'Ball Gown',
+    'ballgown': 'Ball Gown',
+    'princess': 'Ball Gown',
+
+    'mermaid': 'Mermaid',
+
+    'fit and flare': 'Fit and Flare',
+    'fit flare': 'Fit and Flare',
+    'fit and flare trumpet': 'Fit and Flare',
+
+    'trumpet': 'Trumpet',
+
+    'sheath': 'Sheath',
+    'column': 'Sheath',
+
+    'empire': 'Empire',
+    'empire waist': 'Empire',
+
+    'tea length': 'Tea Length',
+    'tea length gown': 'Tea Length',
+
+    'mini': 'Mini',
+    'mini dress': 'Mini',
+    'short': 'Mini'
+  };
+
+  return aliases[cleaned] || null;
+}
+
+// ----------------------------------------------------
+// INPUT VALIDATION
+// ----------------------------------------------------
+
+function validateMeasurements(body) {
+  if (!body || typeof body !== 'object') {
+    return null;
+  }
+
+  const required = [
+    'bust',
+    'waist',
+    'hips',
+    'heightFeet',
+    'heightInches'
+  ];
+
+  for (const field of required) {
+    if (
+      body[field] === undefined ||
+      body[field] === null ||
+      String(body[field]).trim() === ''
+    ) {
+      return null;
+    }
+  }
+
+  const bust = Number(body.bust);
+  const waist = Number(body.waist);
+  const hips = Number(body.hips);
+  const heightFeet = Number(body.heightFeet);
+  const heightInches = Number(body.heightInches);
+
+  const values = [
+    bust,
+    waist,
+    hips,
+    heightFeet,
+    heightInches
+  ];
+
+  if (!values.every(Number.isFinite)) {
+    return null;
+  }
+
+  if (
+    bust <= 0 || bust > 120 ||
+    waist <= 0 || waist > 120 ||
+    hips <= 0 || hips > 120
+  ) {
+    return null;
+  }
+
+  if (
+    !Number.isInteger(heightFeet) ||
+    !Number.isInteger(heightInches) ||
+    heightFeet < 0 ||
+    heightFeet > 8 ||
+    heightInches < 0 ||
+    heightInches > 11 ||
+    heightFeet * 12 + heightInches < 24
+  ) {
+    return null;
+  }
+
+  return {
+    bust,
+    waist,
+    hips,
+    heightFeet,
+    heightInches
+  };
+}
+
+// ----------------------------------------------------
+// VERCEL API HANDLER
+// ----------------------------------------------------
 
 export default async function handler(req, res) {
 
-  // ----------------------------------------------------
-  // 1. CORS HEADERS
-  // ----------------------------------------------------
+  // ------------------------------------------------
+  // 1. CORS
+  // ------------------------------------------------
 
   res.setHeader(
     'Access-Control-Allow-Origin',
@@ -60,10 +214,7 @@ export default async function handler(req, res) {
     'Content-Type, Authorization'
   );
 
-  res.setHeader(
-    'Cache-Control',
-    'no-store'
-  );
+  res.setHeader('Cache-Control', 'no-store');
 
   if (req.method === 'OPTIONS') {
     return res.status(204).end();
@@ -75,23 +226,32 @@ export default async function handler(req, res) {
     });
   }
 
-  // ----------------------------------------------------
-  // 2. CHECK API CONFIGURATION
-  // ----------------------------------------------------
+  // ------------------------------------------------
+  // 2. VALIDATE CONFIGURATION
+  // ------------------------------------------------
 
   if (!process.env.OPENAI_API_KEY) {
-    console.error('Missing OPENAI_API_KEY');
+    console.error('OPENAI_API_KEY is missing');
 
     return res.status(500).json({
       error: 'Service configuration error'
     });
   }
 
+  // ------------------------------------------------
+  // 3. PROCESS RECOMMENDATION REQUEST
+  // ------------------------------------------------
+
   try {
 
-    // ------------------------------------------------
-    // 3. READ USER MEASUREMENTS
-    // ------------------------------------------------
+    const measurements =
+      validateMeasurements(req.body);
+
+    if (!measurements) {
+      return res.status(400).json({
+        error: 'Please provide valid measurements.'
+      });
+    }
 
     const {
       bust,
@@ -99,211 +259,131 @@ export default async function handler(req, res) {
       hips,
       heightFeet,
       heightInches
-    } = req.body || {};
-
-    const measurements = [
-      bust,
-      waist,
-      hips,
-      heightFeet,
-      heightInches
-    ].map(Number);
-
-    const [
-      bustNum,
-      waistNum,
-      hipsNum,
-      feetNum,
-      inchesNum
-    ] = measurements;
-
-    // Validate numbers
-    if (
-      measurements.some(n => !Number.isFinite(n)) ||
-      bustNum <= 0 ||
-      waistNum <= 0 ||
-      hipsNum <= 0 ||
-      bustNum > 120 ||
-      waistNum > 120 ||
-      hipsNum > 120 ||
-      !Number.isInteger(feetNum) ||
-      !Number.isInteger(inchesNum) ||
-      feetNum < 0 ||
-      feetNum > 8 ||
-      inchesNum < 0 ||
-      inchesNum > 11 ||
-      feetNum * 12 + inchesNum < 24
-    ) {
-      return res.status(400).json({
-        error: 'Please enter valid measurements.'
-      });
-    }
+    } = measurements;
 
     const measurementText =
-      `Bust: ${bustNum} inches, ` +
-      `Waist: ${waistNum} inches, ` +
-      `Hips: ${hipsNum} inches, ` +
-      `Height: ${feetNum} feet ${inchesNum} inches`;
-
-    console.log('Processing wedding dress recommendation');
+      `Bust: ${bust} inches; ` +
+      `Waist: ${waist} inches; ` +
+      `Hips: ${hips} inches; ` +
+      `Height: ${heightFeet} feet ` +
+      `${heightInches} inches.`;
 
     // ------------------------------------------------
-    // 4. GENERATE DRESS STYLE RECOMMENDATIONS
+    // 4. ASK OPENAI FOR RECOMMENDATIONS
     // ------------------------------------------------
+
+    const availableStyles =
+      Object.keys(STYLE_IMAGES).join(', ');
 
     const chat = await openai.chat.completions.create({
 
       model: TEXT_MODEL,
 
-      temperature: 0.4,
+      temperature: 0.3,
 
-      max_tokens: 120,
+      max_tokens: 100,
 
       messages: [
         {
           role: 'system',
           content:
             'You are an expert bridal stylist for ' +
-            'Enchanted Gowns, a wedding dress boutique. ' +
-            'Recommend flattering dress silhouettes ' +
-            'based on measurements. ' +
-            'Never make negative judgments about body shape. ' +
-            'Provide short, clear style names only.'
+            'Enchanted Gowns, a bridal boutique. ' +
+            'Recommend wedding dress silhouettes ' +
+            'using the provided body measurements. ' +
+            'Focus on flattering proportions, ' +
+            'comfort, and bridal elegance. ' +
+            'Do not make negative body judgments. ' +
+            'Only return styles from the approved list. ' +
+            'Return exactly three distinct style names, ' +
+            'one per line, without explanations.'
         },
         {
           role: 'user',
           content:
-            `Bride measurements: ${measurementText}. ` +
-            `Recommend exactly three distinct wedding ` +
-            `dress silhouettes that may flatter these ` +
-            `proportions. Choose familiar styles such as ` +
-            `A-Line, Ball Gown, Mermaid, Sheath, Empire, ` +
-            `Fit and Flare, or Trumpet. ` +
-            `Return ONLY the three style names, ` +
-            `one per line. Do not number them.`
+            `Bride measurements: ${measurementText}\n` +
+            `Available styles: ${availableStyles}\n` +
+            'Select the three most suitable styles. ' +
+            'Return only their exact names, ' +
+            'one per line. No numbering.'
         }
       ]
     });
 
     // ------------------------------------------------
-    // 5. EXTRACT RECOMMENDED STYLES
+    // 5. PARSE RECOMMENDATIONS
     // ------------------------------------------------
 
     const raw =
       chat.choices?.[0]?.message?.content || '';
 
-    const styles = [
-      ...new Set(
-        raw
-          .split(/\r?\n/)
-          .map(s =>
-            s.replace(
-              /^[\d.\-)*\s]+/,
-              ''
-            ).trim()
-          )
-          .filter(Boolean)
-          .map(s => s.substring(0, 80))
-      )
-    ].slice(0, MAX_RECOMMENDATIONS);
+    const lines = raw.split(/\r?\n/);
 
-    if (styles.length === 0) {
-      console.error('No styles returned by text model');
+    const styles = [];
 
-      return res.status(502).json({
-        error: 'Could not generate recommendations'
-      });
+    for (const line of lines) {
+
+      // Strip common list numbering and formatting.
+      const cleaned = line
+        .replace(/^\s*(?:[-*]|\d+[.)])\s*/, '')
+        .replace(/\*/g, '')
+        .trim();
+
+      const canonical = normalizeStyle(cleaned);
+
+      if (
+        canonical &&
+        STYLE_IMAGES[canonical] &&
+        !styles.includes(canonical)
+      ) {
+        styles.push(canonical);
+      }
+
+      if (styles.length >= MAX_RECOMMENDATIONS) {
+        break;
+      }
     }
 
-    console.log('Recommended styles:', styles);
+    // If the AI returned fewer than 3 valid styles,
+    // supplement with broad traditional silhouettes.
+    const fallbacks = [
+      'A-Line',
+      'Ball Gown',
+      'Sheath'
+    ];
+
+    for (const fallback of fallbacks) {
+      if (styles.length >= MAX_RECOMMENDATIONS) {
+        break;
+      }
+
+      if (!styles.includes(fallback)) {
+        styles.push(fallback);
+      }
+    }
 
     // ------------------------------------------------
-    // 6. GENERATE IMAGES IN PARALLEL
+    // 6. MATCH EXISTING IMAGE URLS
     // ------------------------------------------------
 
-    const images = await Promise.all(
-
-      styles.map(async style => {
-
-        try {
-
-          const imageResponse =
-            await openai.images.generate({
-
-              model: IMAGE_MODEL,
-
-              prompt:
-                `Professional bridal boutique fashion ` +
-                `photography. Full-length front view ` +
-                `of an adult model wearing an elegant ` +
-                `${style} wedding gown. ` +
-                `Clearly emphasize the silhouette ` +
-                `and shape of the dress. ` +
-                `Ivory bridal fabric, realistic ` +
-                `details, soft natural studio ` +
-                `lighting, clean neutral background. ` +
-                `Entire wedding dress visible ` +
-                `from neckline to hem. ` +
-                `No writing, no logos, no watermark.`,
-
-              size: IMAGE_SIZE,
-
-              quality: IMAGE_QUALITY,
-
-              output_format: 'jpeg',
-
-              output_compression: 65,
-
-              n: 1
-            });
-
-          const base64 =
-            imageResponse?.data?.[0]?.b64_json;
-
-          if (!base64) {
-            console.warn(
-              `No image data returned for ${style}`
-            );
-            return null;
-          }
-
-          // Convert to browser-compatible data URL.
-          return `data:image/jpeg;base64,${base64}`;
-
-        } catch (imageError) {
-
-          console.error(
-            `Image generation error (${style}):`,
-            imageError.message
-          );
-
-          // Allow other recommendations to succeed.
-          return null;
-        }
-
-      })
-    );
+    const imageUrls = styles.map(style => {
+      return STYLE_IMAGES[style] || null;
+    });
 
     // ------------------------------------------------
-    // 7. RETURN RESULTS TO WORDPRESS
+    // 7. SEND RESULTS TO WORDPRESS
     // ------------------------------------------------
-
-    const imagesGenerated =
-      images.filter(Boolean).length;
 
     console.log(
-      `Generated ${imagesGenerated} of ` +
-      `${styles.length} images`
+      'Recommendation completed:',
+      styles.join(', ')
     );
-
-    // Keep exact field names expected by
-    // the existing WordPress plugin.
 
     return res.status(200).json({
 
       recommendations: styles,
 
-      images: images
+      images: imageUrls
 
     });
 
@@ -314,12 +394,12 @@ export default async function handler(req, res) {
     // ------------------------------------------------
 
     console.error(
-      'recommend.js server error:',
+      'Style recommendation error:',
       error.message
     );
 
     return res.status(500).json({
-      error: 'Unable to process recommendation'
+      error: 'Unable to generate recommendations.'
     });
 
   }
